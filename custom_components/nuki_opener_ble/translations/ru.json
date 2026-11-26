@@ -8,7 +8,7 @@
       },
       "pair": {
         "title": "Сопряжение с {name}",
-        "description": "Переведите Opener в режим сопряжения: удерживайте кнопку 5 секунд, пока не загорится светодиодное кольцо, затем в течение 30 секунд нажмите «Подтвердить».\n\nСопряжение как мост занимает единственный слот моста Opener; как приложение — один из слотов приложений.",
+        "description": "Переведите Opener в режим сопряжения: удерживайте кнопку 5 секунд, пока не загорится светодиодное кольцо, затем в течение 30 секунд нажмите «Подтвердить».\n\nСопряжение как мост занимает единственный слот моста (существующий Nuki Bridge будет отвязан); как приложение — один из слотов приложений.",
         "data": {
           "client_name": "Имя в приложении Nuki",
           "pair_as_bridge": "Сопрячь как мост (bridge)"
@@ -23,14 +23,193 @@
     "abort": {
       "already_configured": "Этот Opener уже настроен.",
       "no_devices_found": "Поблизости не найден ни один Nuki Opener.",
-      "not_supported": "Это устройство не является Nuki Opener."
+      "not_supported": "Это устройство не является Nuki Opener.",
+      "reauth_successful": "Opener сопряжён заново."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Настройки Nuki Opener",
+        "description": "PIN-код безопасности (задаётся в приложении Nuki) включает надёжное распознавание звонка по журналу, сам журнал событий, изменение настроек устройства, синхронизацию времени и перезагрузку. Перед сохранением PIN проверяется на устройстве.",
+        "data": {
+          "pin": "PIN-код безопасности",
+          "poll_interval": "Интервал опроса состояния",
+          "info_interval": "Интервал обновления батареи и настроек"
+        }
+      }
+    },
+    "error": {
+      "invalid_pin": "PIN должен быть числом от 1 до 65535.",
+      "wrong_pin": "Opener отклонил этот PIN.",
+      "cannot_connect": "Не удалось подключиться к Opener по Bluetooth."
+    }
+  },
+  "issues": {
+    "bad_pin": {
+      "title": "Неверный PIN-код для {name}",
+      "description": "Opener отклонил PIN-код. Функции, которым он нужен, приостановлены, чтобы не заблокировать устройство. Укажите правильный PIN в настройках интеграции."
     }
   },
   "entity": {
-    "button": { "open": { "name": "Открыть дверь" } },
+    "binary_sensor": {
+      "keypad_battery_critical": { "name": "Батарея клавиатуры" }
+    },
+    "button": {
+      "open": { "name": "Открыть дверь" },
+      "refresh": { "name": "Обновить" },
+      "sync_time": { "name": "Синхронизировать время" }
+    },
+    "event": {
+      "doorbell": {
+        "name": "Звонок",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "ring": "Звонок",
+              "ring_opened": "Звонок (дверь открыта)"
+            }
+          }
+        }
+      }
+    },
+    "number": {
+      "rto_timeout": { "name": "Таймаут Ring to Open" },
+      "electric_strike_duration": { "name": "Длительность открытия" },
+      "electric_strike_delay": { "name": "Задержка открытия" },
+      "doorbell_suppression_duration": { "name": "Длительность подавления звонка" },
+      "sound_level": { "name": "Громкость" }
+    },
+    "select": {
+      "button_press_action": {
+        "name": "Одиночное нажатие кнопки",
+        "state": {
+          "no_action": "Ничего",
+          "toggle_rto": "Переключить Ring to Open",
+          "activate_rto": "Включить Ring to Open",
+          "deactivate_rto": "Выключить Ring to Open",
+          "toggle_cm": "Переключить постоянный режим",
+          "activate_cm": "Включить постоянный режим",
+          "deactivate_cm": "Выключить постоянный режим",
+          "open": "Открыть"
+        }
+      },
+      "double_button_press_action": {
+        "name": "Двойное нажатие кнопки",
+        "state": {
+          "no_action": "Ничего",
+          "toggle_rto": "Переключить Ring to Open",
+          "activate_rto": "Включить Ring to Open",
+          "deactivate_rto": "Выключить Ring to Open",
+          "toggle_cm": "Переключить постоянный режим",
+          "activate_cm": "Включить постоянный режим",
+          "deactivate_cm": "Выключить постоянный режим",
+          "open": "Открыть"
+        }
+      },
+      "battery_type": {
+        "name": "Тип батарей",
+        "state": {
+          "alkali": "Щелочные",
+          "accumulators": "Аккумуляторы",
+          "lithium": "Литиевые"
+        }
+      },
+      "advertising_mode": {
+        "name": "Режим Bluetooth-рекламы",
+        "state": {
+          "automatic": "Автоматический",
+          "normal": "Обычный",
+          "slow": "Медленный",
+          "slowest": "Самый медленный"
+        }
+      }
+    },
+    "sensor": {
+      "lock_state": {
+        "name": "Состояние",
+        "state": {
+          "uncalibrated": "Не откалиброван",
+          "locked": "Заперто",
+          "rto_active": "Ring to Open активен",
+          "open": "Открыто",
+          "opening": "Открывается",
+          "undefined": "Неизвестно"
+        }
+      },
+      "mode": {
+        "name": "Режим",
+        "state": {
+          "uninitialized": "Не инициализирован",
+          "pairing": "Сопряжение",
+          "door": "Обычный режим",
+          "continuous": "Постоянный режим",
+          "maintenance": "Обслуживание"
+        }
+      },
+      "trigger": {
+        "name": "Источник",
+        "state": {
+          "system": "Система",
+          "manual": "Вручную",
+          "button": "Кнопка",
+          "automatic": "Автоматически",
+          "undefined": "Неизвестно"
+        }
+      },
+      "last_action": {
+        "name": "Последнее действие",
+        "state": {
+          "activate_rto": "Включить Ring to Open",
+          "deactivate_rto": "Выключить Ring to Open",
+          "electric_strike_actuation": "Открыть",
+          "activate_cm": "Включить постоянный режим",
+          "deactivate_cm": "Выключить постоянный режим",
+          "fob_action_1": "Брелок: действие 1",
+          "fob_action_2": "Брелок: действие 2",
+          "fob_action_3": "Брелок: действие 3"
+        }
+      },
+      "last_action_trigger": {
+        "name": "Источник последнего действия",
+        "state": {
+          "system": "Система",
+          "manual": "Вручную",
+          "button": "Кнопка",
+          "automatic": "Автоматически",
+          "undefined": "Неизвестно"
+        }
+      },
+      "last_action_completion": {
+        "name": "Результат последнего действия",
+        "state": {
+          "success": "Успешно",
+          "canceled": "Отменено",
+          "too_recent": "Слишком часто",
+          "busy": "Занято",
+          "incomplete": "Не завершено",
+          "not_authorized": "Нет доступа",
+          "invalid_code": "Неверный код",
+          "other_error": "Другая ошибка",
+          "unknown": "Неизвестно"
+        }
+      },
+      "ring_to_open_timer": { "name": "Ring to Open: осталось" },
+      "last_ring": { "name": "Последний звонок" },
+      "last_log": { "name": "Последнее событие" },
+      "battery_voltage": { "name": "Напряжение батареи" },
+      "rssi": { "name": "Уровень сигнала" },
+      "device_time": { "name": "Время устройства" }
+    },
     "switch": {
       "ring_to_open": { "name": "Ring to Open" },
-      "continuous_mode": { "name": "Постоянный режим" }
+      "continuous_mode": { "name": "Постоянный режим" },
+      "led_flash": { "name": "Мигание светодиода" },
+      "button_enabled": { "name": "Кнопка включена" },
+      "pairing_enabled": { "name": "Bluetooth-сопряжение" },
+      "disable_rto_after_ring": { "name": "Выключать Ring to Open после звонка" },
+      "random_electric_strike_delay": { "name": "Случайная задержка открытия" },
+      "automatic_battery_type_detection": { "name": "Автоопределение типа батарей" }
     }
   }
 }

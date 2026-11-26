@@ -6,7 +6,7 @@ from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH, DeviceIn
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
-from .coordinator import NukiOpenerCoordinator
+from .coordinator import NukiOpenerCoordinator, OpenerData
 
 
 class NukiOpenerEntity(CoordinatorEntity[NukiOpenerCoordinator]):
@@ -24,3 +24,7 @@ class NukiOpenerEntity(CoordinatorEntity[NukiOpenerCoordinator]):
             model="Opener",
             name=coordinator.config_entry.title,
         )
+
+    @property
+    def opener(self) -> OpenerData:
+        return self.coordinator.data

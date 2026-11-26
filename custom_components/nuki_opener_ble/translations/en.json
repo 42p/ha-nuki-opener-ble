@@ -8,7 +8,7 @@
       },
       "pair": {
         "title": "Pair with {name}",
-        "description": "Put the Opener into pairing mode: hold its button for 5 seconds until the LED ring lights up, then press Submit within 30 seconds.\n\nPairing as a bridge uses the Opener's single bridge slot; pairing as an app uses one of the app slots.",
+        "description": "Put the Opener into pairing mode: hold its button for 5 seconds until the LED ring lights up, then press Submit within 30 seconds.\n\nPairing as a bridge uses the Opener's single bridge slot (an existing Nuki Bridge gets unpaired); pairing as an app uses one of the app slots.",
         "data": {
           "client_name": "Name shown in the Nuki app",
           "pair_as_bridge": "Pair as bridge"
@@ -23,14 +23,193 @@
     "abort": {
       "already_configured": "This Opener is already configured.",
       "no_devices_found": "No Nuki Opener found nearby.",
-      "not_supported": "This device is not a Nuki Opener."
+      "not_supported": "This device is not a Nuki Opener.",
+      "reauth_successful": "The Opener was paired again."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Nuki Opener options",
+        "description": "The security PIN (set in the Nuki app) enables reliable doorbell detection via the activity log, the activity log itself, device settings, time sync and reboot. It is verified once before saving.",
+        "data": {
+          "pin": "Security PIN",
+          "poll_interval": "State poll interval",
+          "info_interval": "Battery and settings refresh interval"
+        }
+      }
+    },
+    "error": {
+      "invalid_pin": "The PIN must be a number between 1 and 65535.",
+      "wrong_pin": "The Opener rejected this PIN.",
+      "cannot_connect": "Could not connect to the Opener over Bluetooth."
+    }
+  },
+  "issues": {
+    "bad_pin": {
+      "title": "Wrong security PIN for {name}",
+      "description": "The Opener rejected the security PIN. Features that need it are paused to avoid locking the device. Enter the correct PIN in the integration options."
     }
   },
   "entity": {
-    "button": { "open": { "name": "Open door" } },
+    "binary_sensor": {
+      "keypad_battery_critical": { "name": "Keypad battery" }
+    },
+    "button": {
+      "open": { "name": "Open door" },
+      "refresh": { "name": "Refresh" },
+      "sync_time": { "name": "Sync time" }
+    },
+    "event": {
+      "doorbell": {
+        "name": "Doorbell",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "ring": "Ring",
+              "ring_opened": "Ring (door opened)"
+            }
+          }
+        }
+      }
+    },
+    "number": {
+      "rto_timeout": { "name": "Ring to Open timeout" },
+      "electric_strike_duration": { "name": "Electric strike duration" },
+      "electric_strike_delay": { "name": "Electric strike delay" },
+      "doorbell_suppression_duration": { "name": "Doorbell suppression duration" },
+      "sound_level": { "name": "Sound level" }
+    },
+    "select": {
+      "button_press_action": {
+        "name": "Button single press",
+        "state": {
+          "no_action": "No action",
+          "toggle_rto": "Toggle Ring to Open",
+          "activate_rto": "Activate Ring to Open",
+          "deactivate_rto": "Deactivate Ring to Open",
+          "toggle_cm": "Toggle continuous mode",
+          "activate_cm": "Activate continuous mode",
+          "deactivate_cm": "Deactivate continuous mode",
+          "open": "Open"
+        }
+      },
+      "double_button_press_action": {
+        "name": "Button double press",
+        "state": {
+          "no_action": "No action",
+          "toggle_rto": "Toggle Ring to Open",
+          "activate_rto": "Activate Ring to Open",
+          "deactivate_rto": "Deactivate Ring to Open",
+          "toggle_cm": "Toggle continuous mode",
+          "activate_cm": "Activate continuous mode",
+          "deactivate_cm": "Deactivate continuous mode",
+          "open": "Open"
+        }
+      },
+      "battery_type": {
+        "name": "Battery type",
+        "state": {
+          "alkali": "Alkaline",
+          "accumulators": "Rechargeable",
+          "lithium": "Lithium"
+        }
+      },
+      "advertising_mode": {
+        "name": "Advertising mode",
+        "state": {
+          "automatic": "Automatic",
+          "normal": "Normal",
+          "slow": "Slow",
+          "slowest": "Slowest"
+        }
+      }
+    },
+    "sensor": {
+      "lock_state": {
+        "name": "State",
+        "state": {
+          "uncalibrated": "Uncalibrated",
+          "locked": "Locked",
+          "rto_active": "Ring to Open active",
+          "open": "Open",
+          "opening": "Opening",
+          "undefined": "Undefined"
+        }
+      },
+      "mode": {
+        "name": "Mode",
+        "state": {
+          "uninitialized": "Uninitialized",
+          "pairing": "Pairing",
+          "door": "Door mode",
+          "continuous": "Continuous mode",
+          "maintenance": "Maintenance"
+        }
+      },
+      "trigger": {
+        "name": "Trigger",
+        "state": {
+          "system": "System",
+          "manual": "Manual",
+          "button": "Button",
+          "automatic": "Automatic",
+          "undefined": "Undefined"
+        }
+      },
+      "last_action": {
+        "name": "Last action",
+        "state": {
+          "activate_rto": "Activate Ring to Open",
+          "deactivate_rto": "Deactivate Ring to Open",
+          "electric_strike_actuation": "Open",
+          "activate_cm": "Activate continuous mode",
+          "deactivate_cm": "Deactivate continuous mode",
+          "fob_action_1": "Fob action 1",
+          "fob_action_2": "Fob action 2",
+          "fob_action_3": "Fob action 3"
+        }
+      },
+      "last_action_trigger": {
+        "name": "Last action trigger",
+        "state": {
+          "system": "System",
+          "manual": "Manual",
+          "button": "Button",
+          "automatic": "Automatic",
+          "undefined": "Undefined"
+        }
+      },
+      "last_action_completion": {
+        "name": "Last action result",
+        "state": {
+          "success": "Success",
+          "canceled": "Canceled",
+          "too_recent": "Too recent",
+          "busy": "Busy",
+          "incomplete": "Incomplete",
+          "not_authorized": "Not authorized",
+          "invalid_code": "Invalid code",
+          "other_error": "Other error",
+          "unknown": "Unknown"
+        }
+      },
+      "ring_to_open_timer": { "name": "Ring to Open remaining" },
+      "last_ring": { "name": "Last ring" },
+      "last_log": { "name": "Last activity" },
+      "battery_voltage": { "name": "Battery voltage" },
+      "rssi": { "name": "Signal strength" },
+      "device_time": { "name": "Device time" }
+    },
     "switch": {
       "ring_to_open": { "name": "Ring to Open" },
-      "continuous_mode": { "name": "Continuous mode" }
+      "continuous_mode": { "name": "Continuous mode" },
+      "led_flash": { "name": "LED flash" },
+      "button_enabled": { "name": "Button enabled" },
+      "pairing_enabled": { "name": "Bluetooth pairing" },
+      "disable_rto_after_ring": { "name": "Disable Ring to Open after ring" },
+      "random_electric_strike_delay": { "name": "Random electric strike delay" },
+      "automatic_battery_type_detection": { "name": "Automatic battery type detection" }
     }
   }
 }

@@ -1,4 +1,4 @@
-"""Nuki Opener Bluetooth LE protocol (pairing, encrypted commands, state parsing).
+"""Nuki Opener Bluetooth LE protocol (pairing, encrypted commands).
 
 Implements the public Nuki BLE API: unencrypted pairing over the pairing GDIO
 characteristic and XSalsa20-Poly1305 encrypted messages over the USDIO
@@ -8,14 +8,15 @@ characteristic. Has no Home Assistant dependencies.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 import hashlib
 import hmac
 import logging
 import os
 import struct
+from types import TracebackType
 
 from bleak import BleakClient
 from bleak.backends.device import BLEDevice
@@ -26,23 +27,38 @@ from nacl.public import PrivateKey
 from nacl.secret import SecretBox
 
 from .const import (
+    ERROR_BUSY,
     ERROR_CODES,
     KEYTURNER_USDIO_UUID,
     PAIRING_GDIO_UUID,
-    UNENCRYPTED_PAYLOAD_LENGTHS,
     ClientType,
     Command,
     OpenerAction,
-    OpenerLockState,
-    OpenerMode,
     Status,
+)
+from .models import (
+    BatteryReport,
+    LogEntry,
+    OpenerAdvancedConfig,
+    OpenerConfig,
+    OpenerState,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 RESPONSE_TIMEOUT = 10.0
 ACTION_TIMEOUT = 30.0
+LOG_IDLE_TIMEOUT = 3.0
+BUSY_RETRIES = 2
 ENCRYPTED_HEADER_LEN = 24 + 4 + 2  # nonce + auth id + length
+
+UNENCRYPTED_PAYLOAD_LENGTHS: dict[int, int] = {
+    Command.PUBLIC_KEY: 32,
+    Command.CHALLENGE: 32,
+    Command.AUTHORIZATION_ID: 32 + 4 + 16 + 32,
+    Command.STATUS: 1,
+    Command.ERROR_REPORT: 3,
+}
 
 
 class NukiError(Exception):
@@ -141,7 +157,6 @@ class _Reassembler:
             if len(buf) < total:
                 return None
         else:
-            # Unknown command: find the first prefix with a valid CRC.
             total = next(
                 (
                     n
@@ -159,63 +174,6 @@ class _Reassembler:
         return command, raw[2:-2]
 
 
-# --- state -------------------------------------------------------------------
-
-
-@dataclass(slots=True)
-class OpenerState:
-    """Parsed Opener keyturner states."""
-
-    mode: OpenerMode | int
-    lock_state: OpenerLockState | int
-    trigger: int
-    device_time: datetime | None
-    battery_critical: bool
-    ring_to_open_timer: int | None = None
-    last_action: int | None = None
-    last_action_trigger: int | None = None
-    last_action_completion: int | None = None
-
-    @property
-    def ring_to_open(self) -> bool:
-        return self.lock_state == OpenerLockState.RTO_ACTIVE
-
-    @property
-    def continuous_mode(self) -> bool:
-        return self.mode == OpenerMode.CONTINUOUS
-
-    @classmethod
-    def parse(cls, payload: bytes) -> OpenerState:
-        if len(payload) < 13:
-            raise NukiError(f"Keyturner states too short ({len(payload)} bytes)")
-        mode, lock, trigger, year, mon, day, hour, minute, sec, _tz, battery = (
-            struct.unpack_from("<BBBHBBBBBhB", payload)
-        )
-        try:
-            device_time = datetime(year, mon, day, hour, minute, sec)
-        except ValueError:
-            device_time = None
-        extra = list(payload[13:18]) + [None] * 5
-        return cls(
-            mode=_enum_or_int(OpenerMode, mode),
-            lock_state=_enum_or_int(OpenerLockState, lock),
-            trigger=trigger,
-            device_time=device_time,
-            battery_critical=bool(battery & 0x01),
-            ring_to_open_timer=extra[1],
-            last_action=extra[2],
-            last_action_trigger=extra[3],
-            last_action_completion=extra[4],
-        )
-
-
-def _enum_or_int(enum_cls, value: int):
-    try:
-        return enum_cls(value)
-    except ValueError:
-        return value
-
-
 @dataclass(slots=True)
 class PairingResult:
     auth_id: int
@@ -223,22 +181,24 @@ class PairingResult:
     app_id: int
 
 
-# --- session -----------------------------------------------------------------
+# --- connection ----------------------------------------------------------------
 
 
 class _Session:
     """One BLE connection with a subscribed characteristic and a message queue."""
 
     def __init__(self, client: BleakClient, char_uuid: str, key: bytes | None) -> None:
-        self._client = client
+        self.client = client
         self._char = char_uuid
         self._reassembler = _Reassembler(key)
         self._queue: asyncio.Queue[tuple[int, bytes] | Exception] = asyncio.Queue()
+        # Keyturner states pushed by the device while waiting for something else.
+        self.unsolicited_states: list[bytes] = []
 
     async def start(self) -> None:
-        await self._client.start_notify(self._char, self._on_data)
+        await self.client.start_notify(self._char, self._on_data)
 
-    def _on_data(self, _sender, data: bytearray) -> None:
+    def _on_data(self, _sender: object, data: bytearray) -> None:
         try:
             for msg in self._reassembler.feed(bytes(data)):
                 self._queue.put_nowait(msg)
@@ -246,65 +206,234 @@ class _Session:
             self._queue.put_nowait(err)
 
     async def write(self, data: bytes) -> None:
-        await self._client.write_gatt_char(self._char, data, response=True)
+        await self.client.write_gatt_char(self._char, data, response=True)
+
+    async def next_message(self, timeout: float) -> tuple[int, bytes]:
+        """Return the next message, raising on ERROR_REPORT."""
+        async with asyncio.timeout(timeout):
+            item = await self._queue.get()
+        if isinstance(item, Exception):
+            raise item
+        command, payload = item
+        if command == Command.ERROR_REPORT:
+            code = payload[0]
+            raise NukiDeviceError(code, struct.unpack_from("<H", payload, 1)[0])
+        return command, payload
 
     async def receive(self, expected: int, timeout: float = RESPONSE_TIMEOUT) -> bytes:
-        """Wait for a message with the given command, raising on ERROR_REPORT."""
-        async with asyncio.timeout(timeout):
-            while True:
-                item = await self._queue.get()
-                if isinstance(item, Exception):
-                    raise item
-                command, payload = item
-                if command == Command.ERROR_REPORT:
-                    code = struct.unpack_from("<b", payload)[0] & 0xFF
-                    raise NukiDeviceError(code, struct.unpack_from("<H", payload, 1)[0])
-                if command == expected:
-                    return payload
-                _LOGGER.debug("Ignoring command 0x%04X while waiting for 0x%04X", command, expected)
+        """Wait for a message with the given command."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while True:
+            command, payload = await self.next_message(max(deadline - loop.time(), 0.01))
+            if command == expected:
+                return payload
+            if command == Command.KEYTURNER_STATES:
+                self.unsolicited_states.append(payload)
+            _LOGGER.debug("Ignoring 0x%04X while waiting for 0x%04X", command, expected)
+
+
+class _Connection:
+    """Async context manager: connect, subscribe, always disconnect."""
+
+    def __init__(
+        self,
+        device: BLEDevice,
+        device_callback: Callable[[], BLEDevice] | None,
+        char_uuid: str,
+        key: bytes | None,
+    ) -> None:
+        self._device = device
+        self._device_callback = device_callback
+        self._char = char_uuid
+        self._key = key
+        self._client: BleakClient | None = None
+
+    async def __aenter__(self) -> _Session:
+        try:
+            self._client = await establish_connection(
+                BleakClientWithServiceCache,
+                self._device,
+                self._device.name or self._device.address,
+                ble_device_callback=self._device_callback,
+            )
+            session = _Session(self._client, self._char, self._key)
+            await session.start()
+        except Exception as err:
+            await self._close()
+            if isinstance(err, NukiError):
+                raise
+            raise NukiError(f"Bluetooth error: {err}") from err
+        return session
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        await self._close()
+        if isinstance(exc, TimeoutError):
+            raise NukiError("Timed out waiting for the Opener") from exc
+        if isinstance(exc, Exception) and not isinstance(exc, NukiError):
+            raise NukiError(f"Bluetooth error: {exc}") from exc
+
+    async def _close(self) -> None:
+        if self._client is not None:
+            try:
+                await self._client.disconnect()
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("Error while disconnecting", exc_info=True)
+            self._client = None
+
+
+# --- authorized client -----------------------------------------------------------
+
+
+class OpenerSession:
+    """Commands available while connected to a paired Opener."""
+
+    def __init__(self, session: _Session, auth_id: int, key: bytes, app_id: int, pin: int | None) -> None:
+        self._s = session
+        self._auth_id = auth_id
+        self._key = key
+        self._app_id = app_id
+        self._pin = pin
+
+    @property
+    def unsolicited_states(self) -> list[bytes]:
+        return self._s.unsolicited_states
+
+    async def _send(self, command: int, payload: bytes = b"") -> None:
+        await self._s.write(build_encrypted(self._key, self._auth_id, command, payload))
+
+    async def _request(self, command: int) -> bytes:
+        await self._send(Command.REQUEST_DATA, struct.pack("<H", command))
+        return await self._s.receive(command)
+
+    async def _challenge(self) -> bytes:
+        return await self._request(Command.CHALLENGE)
+
+    def _pin_bytes(self) -> bytes:
+        if self._pin is None:
+            raise NukiError("This command requires the Opener security PIN (set it in the integration options)")
+        return struct.pack("<H", self._pin)
+
+    async def _with_challenge(self, command: int, payload: bytes = b"", pin: bool = False) -> None:
+        nonce = await self._challenge()
+        await self._send(command, payload + nonce + (self._pin_bytes() if pin else b""))
+
+    async def _expect_complete(self, timeout: float = RESPONSE_TIMEOUT) -> None:
+        status = await self._s.receive(Command.STATUS, timeout)
+        if status[0] != Status.COMPLETE:
+            raise NukiError(f"Unexpected status 0x{status[0]:02X}")
+
+    # reads -----------------------------------------------------------------
+
+    async def state(self) -> OpenerState:
+        return OpenerState.parse(await self._request(Command.KEYTURNER_STATES))
+
+    async def battery_report(self) -> BatteryReport:
+        return BatteryReport.parse(await self._request(Command.BATTERY_REPORT))
+
+    async def config(self) -> OpenerConfig:
+        await self._with_challenge(Command.REQUEST_CONFIG)
+        return OpenerConfig.parse(await self._s.receive(Command.CONFIG))
+
+    async def advanced_config(self) -> OpenerAdvancedConfig:
+        await self._with_challenge(Command.REQUEST_ADVANCED_CONFIG)
+        return OpenerAdvancedConfig.parse(await self._s.receive(Command.ADVANCED_CONFIG))
+
+    async def log_entries(self, count: int, start_index: int = 0) -> list[LogEntry]:
+        """Most recent log entries, newest first (requires PIN)."""
+        payload = struct.pack("<IHBB", start_index, count, 1, 0)  # descending, no count
+        await self._with_challenge(Command.REQUEST_LOG_ENTRIES, payload, pin=True)
+        entries: list[LogEntry] = []
+        timeout = RESPONSE_TIMEOUT
+        while len(entries) < count:
+            try:
+                command, data = await self._s.next_message(timeout)
+            except TimeoutError:
+                if entries:
+                    break
+                raise
+            timeout = LOG_IDLE_TIMEOUT
+            if command == Command.LOG_ENTRY:
+                entries.append(LogEntry.parse(data))
+            elif command == Command.STATUS:
+                break
+        return entries
+
+    # writes ----------------------------------------------------------------
+
+    async def lock_action(self, action: OpenerAction) -> None:
+        if action in (OpenerAction.ACTIVATE_CM, OpenerAction.DEACTIVATE_CM) and self._pin is not None:
+            # Newer firmware only honours continuous mode through this command.
+            enabled = 1 if action == OpenerAction.ACTIVATE_CM else 0
+            await self._with_challenge(
+                Command.CONTINUOUS_MODE_ACTION, struct.pack("<BB", enabled, 0), pin=True
+            )
+        else:
+            await self._with_challenge(
+                Command.LOCK_ACTION, struct.pack("<BIB", action, self._app_id, 0)
+            )
+        if (await self._s.receive(Command.STATUS))[0] == Status.ACCEPTED:
+            await self._expect_complete(ACTION_TIMEOUT)
+
+    async def set_config(self, payload: bytes) -> None:
+        await self._with_challenge(Command.SET_CONFIG, payload, pin=True)
+        await self._expect_complete()
+
+    async def set_advanced_config(self, payload: bytes) -> None:
+        await self._with_challenge(Command.SET_ADVANCED_CONFIG, payload, pin=True)
+        await self._expect_complete()
+
+    async def verify_pin(self) -> None:
+        await self._with_challenge(Command.VERIFY_SECURITY_PIN, pin=True)
+        await self._expect_complete()
+
+    async def update_time(self, when: datetime | None = None) -> None:
+        now = (when or datetime.now(UTC)).astimezone(UTC)
+        payload = struct.pack(
+            "<HBBBBB", now.year, now.month, now.day, now.hour, now.minute, now.second
+        )
+        await self._with_challenge(Command.UPDATE_TIME, payload, pin=True)
+        await self._expect_complete()
+
+    async def reboot(self) -> None:
+        await self._with_challenge(Command.REQUEST_REBOOT, pin=True)
+        await self._expect_complete()
 
 
 class NukiOpenerClient:
-    """High level client for a paired Opener."""
+    """Opens a connection to a paired Opener and runs a coroutine in it."""
 
-    def __init__(self, auth_id: int, shared_key: bytes, app_id: int) -> None:
-        self._auth_id = auth_id
-        self._key = shared_key
-        self._app_id = app_id
+    def __init__(self, auth_id: int, shared_key: bytes, app_id: int, pin: int | None = None) -> None:
+        self.auth_id = auth_id
+        self.shared_key = shared_key
+        self.app_id = app_id
+        self.pin = pin
 
-    async def _send(self, session: _Session, command: int, payload: bytes = b"") -> None:
-        await session.write(build_encrypted(self._key, self._auth_id, command, payload))
-
-    async def _read_state(self, session: _Session) -> OpenerState:
-        await self._send(session, Command.REQUEST_DATA, struct.pack("<H", Command.KEYTURNER_STATES))
-        return OpenerState.parse(await session.receive(Command.KEYTURNER_STATES))
-
-    async def get_state(
-        self, device: BLEDevice, device_callback: Callable[[], BLEDevice] | None = None
-    ) -> OpenerState:
-        async with _connect(device, device_callback, KEYTURNER_USDIO_UUID, self._key) as session:
-            return await self._read_state(session)
-
-    async def lock_action(
+    async def run[T](
         self,
         device: BLEDevice,
-        action: OpenerAction,
-        device_callback: Callable[[], BLEDevice] | None = None,
-    ) -> OpenerState:
-        """Execute an action and return the state read afterwards."""
-        async with _connect(device, device_callback, KEYTURNER_USDIO_UUID, self._key) as session:
-            await self._send(session, Command.REQUEST_DATA, struct.pack("<H", Command.CHALLENGE))
-            nonce = await session.receive(Command.CHALLENGE)
-            await self._send(
-                session,
-                Command.LOCK_ACTION,
-                struct.pack("<BIB", action, self._app_id, 0) + nonce,
-            )
-            if (await session.receive(Command.STATUS))[0] == Status.ACCEPTED:
-                status = await session.receive(Command.STATUS, ACTION_TIMEOUT)
-                if status[0] != Status.COMPLETE:
-                    raise NukiError(f"Unexpected action status 0x{status[0]:02X}")
-            return await self._read_state(session)
+        device_callback: Callable[[], BLEDevice] | None,
+        job: Callable[[OpenerSession], Awaitable[T]],
+    ) -> T:
+        """Connect, run `job(session)`, disconnect. Retries when the Opener is busy."""
+        for attempt in range(BUSY_RETRIES + 1):
+            try:
+                async with _Connection(
+                    device, device_callback, KEYTURNER_USDIO_UUID, self.shared_key
+                ) as raw:
+                    session = OpenerSession(raw, self.auth_id, self.shared_key, self.app_id, self.pin)
+                    return await job(session)
+            except NukiDeviceError as err:
+                if err.code != ERROR_BUSY or attempt == BUSY_RETRIES:
+                    raise
+                _LOGGER.debug("Opener busy, retrying")
+                await asyncio.sleep(1 + attempt)
+        raise NukiError("unreachable")
 
 
 async def async_pair(
@@ -315,7 +444,7 @@ async def async_pair(
     secret = PrivateKey.generate()
     client_pk = bytes(secret.public_key)
 
-    async with _connect(device, None, PAIRING_GDIO_UUID, None) as session:
+    async with _Connection(device, None, PAIRING_GDIO_UUID, None) as session:
 
         async def send(command: int, payload: bytes = b"") -> None:
             await session.write(build_unencrypted(command, payload))
@@ -352,53 +481,3 @@ async def async_pair(
 
     _LOGGER.debug("Paired with %s, authorization id %s", device.address, auth_id)
     return PairingResult(auth_id=auth_id, shared_key=shared_key, app_id=app_id)
-
-
-class _connect:
-    """Async context manager: connect, subscribe, disconnect."""
-
-    def __init__(
-        self,
-        device: BLEDevice,
-        device_callback: Callable[[], BLEDevice] | None,
-        char_uuid: str,
-        key: bytes | None,
-    ) -> None:
-        self._device = device
-        self._device_callback = device_callback
-        self._char = char_uuid
-        self._key = key
-        self._client: BleakClient | None = None
-
-    async def __aenter__(self) -> _Session:
-        try:
-            self._client = await establish_connection(
-                BleakClientWithServiceCache,
-                self._device,
-                self._device.name or self._device.address,
-                ble_device_callback=self._device_callback,
-            )
-            session = _Session(self._client, self._char, self._key)
-            await session.start()
-        except NukiError:
-            await self._close()
-            raise
-        except Exception as err:  # bleak raises a variety of errors
-            await self._close()
-            raise NukiError(f"Bluetooth error: {err}") from err
-        return session
-
-    async def __aexit__(self, exc_type, exc, tb) -> None:
-        await self._close()
-        if isinstance(exc, TimeoutError):
-            raise NukiError("Timed out waiting for the Opener") from exc
-        if isinstance(exc, Exception) and not isinstance(exc, NukiError):
-            raise NukiError(f"Bluetooth error: {exc}") from exc
-
-    async def _close(self) -> None:
-        if self._client is not None:
-            try:
-                await self._client.disconnect()
-            except Exception:  # noqa: BLE001
-                _LOGGER.debug("Error while disconnecting", exc_info=True)
-            self._client = None

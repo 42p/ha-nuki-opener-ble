@@ -29,24 +29,24 @@ class NukiOpenerLock(NukiOpenerEntity, LockEntity):
 
     @property
     def is_locked(self) -> bool:
-        state = self.coordinator.data
+        state = self.opener.state
         return not (state.ring_to_open or state.continuous_mode)
 
     @property
     def is_open(self) -> bool:
-        return self.coordinator.data.lock_state == OpenerLockState.OPEN
+        return self.opener.state.lock_state == OpenerLockState.OPEN
 
     @property
     def is_opening(self) -> bool:
-        return self.coordinator.data.lock_state == OpenerLockState.OPENING
+        return self.opener.state.lock_state == OpenerLockState.OPENING
 
     async def async_unlock(self, **kwargs: Any) -> None:
         await self.coordinator.async_action(OpenerAction.ACTIVATE_RTO)
 
     async def async_lock(self, **kwargs: Any) -> None:
-        if self.coordinator.data.continuous_mode:
-            await self.coordinator.async_action(OpenerAction.DEACTIVATE_CONTINUOUS_MODE)
-        if self.coordinator.data.ring_to_open:
+        if self.opener.state.continuous_mode:
+            await self.coordinator.async_action(OpenerAction.DEACTIVATE_CM)
+        if self.opener.state.ring_to_open:
             await self.coordinator.async_action(OpenerAction.DEACTIVATE_RTO)
 
     async def async_open(self, **kwargs: Any) -> None:
