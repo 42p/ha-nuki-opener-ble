@@ -1,0 +1,28 @@
+{
+  "domain": "nuki_opener_ble",
+  "name": "Nuki Opener (Bluetooth)",
+  "bluetooth": [
+    {
+      "connectable": true,
+      "service_uuid": "a92ae200-5501-11e4-916c-0800200c9a66"
+    },
+    {
+      "connectable": true,
+      "service_uuid": "a92ae100-5501-11e4-916c-0800200c9a66"
+    },
+    {
+      "connectable": true,
+      "manufacturer_id": 76,
+      "manufacturer_data_start": [2, 21, 169, 42, 226, 0, 85, 1, 17, 228]
+    }
+  ],
+  "codeowners": ["@42p"],
+  "config_flow": true,
+  "dependencies": ["bluetooth_adapters"],
+  "documentation": "https://github.com/42p/ha-nuki-opener-ble",
+  "integration_type": "device",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/42p/ha-nuki-opener-ble/issues",
+  "requirements": ["PyNaCl>=1.5.0"],
+  "version": "0.1.0"
+}

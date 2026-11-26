@@ -1,0 +1,36 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user": {
+        "description": "Select the Nuki Opener to set up.",
+        "data": { "address": "Device" }
+      },
+      "pair": {
+        "title": "Pair with {name}",
+        "description": "Put the Opener into pairing mode: hold its button for 5 seconds until the LED ring lights up, then press Submit within 30 seconds.\n\nPairing as a bridge uses the Opener's single bridge slot; pairing as an app uses one of the app slots.",
+        "data": {
+          "client_name": "Name shown in the Nuki app",
+          "pair_as_bridge": "Pair as bridge"
+        }
+      }
+    },
+    "error": {
+      "not_pairing_mode": "The Opener is not in pairing mode. Hold its button for 5 seconds and try again.",
+      "pairing_failed": "The Opener rejected the pairing. Check the log for details.",
+      "cannot_connect": "Could not connect to the Opener over Bluetooth."
+    },
+    "abort": {
+      "already_configured": "This Opener is already configured.",
+      "no_devices_found": "No Nuki Opener found nearby.",
+      "not_supported": "This device is not a Nuki Opener."
+    }
+  },
+  "entity": {
+    "button": { "open": { "name": "Open door" } },
+    "switch": {
+      "ring_to_open": { "name": "Ring to Open" },
+      "continuous_mode": { "name": "Continuous mode" }
+    }
+  }
+}

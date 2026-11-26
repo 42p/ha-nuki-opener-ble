@@ -1,0 +1,36 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user": {
+        "description": "Выберите Nuki Opener для настройки.",
+        "data": { "address": "Устройство" }
+      },
+      "pair": {
+        "title": "Сопряжение с {name}",
+        "description": "Переведите Opener в режим сопряжения: удерживайте кнопку 5 секунд, пока не загорится светодиодное кольцо, затем в течение 30 секунд нажмите «Подтвердить».\n\nСопряжение как мост занимает единственный слот моста Opener; как приложение — один из слотов приложений.",
+        "data": {
+          "client_name": "Имя в приложении Nuki",
+          "pair_as_bridge": "Сопрячь как мост (bridge)"
+        }
+      }
+    },
+    "error": {
+      "not_pairing_mode": "Opener не в режиме сопряжения. Удерживайте кнопку 5 секунд и попробуйте снова.",
+      "pairing_failed": "Opener отклонил сопряжение. Подробности в журнале.",
+      "cannot_connect": "Не удалось подключиться к Opener по Bluetooth."
+    },
+    "abort": {
+      "already_configured": "Этот Opener уже настроен.",
+      "no_devices_found": "Поблизости не найден ни один Nuki Opener.",
+      "not_supported": "Это устройство не является Nuki Opener."
+    }
+  },
+  "entity": {
+    "button": { "open": { "name": "Открыть дверь" } },
+    "switch": {
+      "ring_to_open": { "name": "Ring to Open" },
+      "continuous_mode": { "name": "Постоянный режим" }
+    }
+  }
+}
