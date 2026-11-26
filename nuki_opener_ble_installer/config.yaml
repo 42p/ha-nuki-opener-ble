@@ -1,0 +1,16 @@
+name: Nuki Opener BLE Installer
+version: "0.1.0"
+slug: nuki_opener_ble_installer
+description: Installs the Nuki Opener (Bluetooth) integration into Home Assistant
+url: https://github.com/42p/ha-nuki-opener-ble
+arch:
+  - aarch64
+  - amd64
+  - armv7
+init: false
+startup: once
+boot: manual
+map:
+  - type: homeassistant_config
+    read_only: false
+    path: /homeassistant

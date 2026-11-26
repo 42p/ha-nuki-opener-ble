@@ -6,11 +6,29 @@
 
 ## Установка
 
-1. Скопируйте `custom_components/nuki_opener_ble` в `config/custom_components/`
-   (или добавьте репозиторий в HACS как Custom repository, тип Integration).
-2. Перезапустите Home Assistant.
-3. Opener найдётся автоматически; если нет — *Настройки → Устройства и службы → Добавить интеграцию → Nuki Opener (Bluetooth)*.
-4. Удерживайте кнопку на Opener 5 секунд (режим сопряжения) и нажмите «Подтвердить».
+### Через магазин приложений (без HACS)
+
+[![Добавить репозиторий](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2F42p%2Fha-nuki-opener-ble)
+
+1. *Настройки → Приложения → Магазин приложений → ⋮ → Репозитории*, добавьте
+   `https://github.com/42p/ha-nuki-opener-ble`.
+2. Установите приложение **Nuki Opener BLE Installer** и нажмите **Запустить** —
+   оно скопирует интеграцию в `/config/custom_components` и остановится.
+3. Перезапустите Home Assistant.
+
+### Через HACS
+
+HACS → ⋮ → *Custom repositories* → `https://github.com/42p/ha-nuki-opener-ble`, тип **Integration**,
+затем установите «Nuki Opener (Bluetooth)» и перезапустите Home Assistant.
+
+### Вручную
+
+Скопируйте `custom_components/nuki_opener_ble` в `/config/custom_components/` и перезапустите Home Assistant.
+
+### Сопряжение
+
+1. Opener найдётся автоматически; если нет — *Настройки → Устройства и службы → Добавить интеграцию → Nuki Opener (Bluetooth)*.
+2. Удерживайте кнопку на Opener 5 секунд (режим сопряжения) и нажмите «Подтвердить».
 
 ## Сущности
 
